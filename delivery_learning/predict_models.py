@@ -37,6 +37,7 @@ def _openai_verbose_transcribe(
             model=model,
             file=f,
             response_format="verbose_json",
+            prompt="음, 어, 아, 저, 근데, 그러니까, 그냥, 아니, 자.",
         )
 
     res_dict = res if isinstance(res, dict) else getattr(res, "__dict__", {})
@@ -57,7 +58,12 @@ def _local_whisper_transcribe(
 
     model_name = local_model_name or os.environ.get("LOCAL_WHISPER_MODEL", "base")
     model = whisper.load_model(model_name)
-    result = model.transcribe(str(audio_path), verbose=False)
+    result = model.transcribe(
+        str(audio_path),
+        verbose=False,
+        initial_prompt="음, 어, 아, 저, 근데, 그러니까, 그냥, 아니, 자.",
+        condition_on_previous_text=False,
+    )
 
     transcript_text = (result.get("text") or "").strip()
     segments = result.get("segments") or []
