@@ -15,6 +15,7 @@ FILLER_WORDS = [
     "아니",
     "근",
     "자",
+    "그",
 ]
 
 DEFAULT_FILLER_HIGH_RATIO = 0.03

@@ -37,7 +37,7 @@ def _openai_verbose_transcribe(
             model=model,
             file=f,
             response_format="verbose_json",
-            prompt="음, 어, 아, 저, 근데, 그러니까, 그냥, 아니, 자.",
+            prompt="음, 어, 아, 저, 근데, 그러니까, 그냥, 아니, 자, 그.",
         )
 
     res_dict = res if isinstance(res, dict) else getattr(res, "__dict__", {})
@@ -61,7 +61,7 @@ def _local_whisper_transcribe(
     result = model.transcribe(
         str(audio_path),
         verbose=False,
-        initial_prompt="음, 어, 아, 저, 근데, 그러니까, 그냥, 아니, 자.",
+        initial_prompt="음, 어, 아, 저, 근데, 그러니까, 그냥, 아니, 자, 그.",
         condition_on_previous_text=False,
     )
 
