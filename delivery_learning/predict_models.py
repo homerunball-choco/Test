@@ -6,8 +6,9 @@ from openai import OpenAI
 
 from delivery_learning.config import settings
 from delivery_learning.consts import DEFAULT_FILLER_HIGH_RATIO
-from delivery_learning.features import analyze_transcript_for_features, build_feature_vector
+from delivery_learning.features import analyze_transcript_for_ml, build_feature_vector
 from delivery_learning.ml_models import TrainedModelBundle, predict_speed_and_filler
+from delivery_learning.runtime import get_local_whisper_model, get_openai_client
 from delivery_learning.stt_durations import resolve_duration_for_metrics
 
 
@@ -26,10 +27,10 @@ def _openai_verbose_transcribe(
     transcribe_model: str | None,
     openai_api_key: str | None,
 ) -> tuple[str, float | None, str]:
-    api_key = openai_api_key or settings.OPENAI_API_KEY
-    if not api_key:
-        raise RuntimeError("OPENAI_API_KEY가 필요합니다(동작: OpenAI STT).")
-    client = OpenAI(api_key=api_key)
+    if openai_api_key and openai_api_key != settings.OPENAI_API_KEY:
+        client = OpenAI(api_key=openai_api_key)
+    else:
+        client = get_openai_client()
     model = transcribe_model or os.environ.get("TRANSCRIBE_MODEL", "whisper-1")
 
     with audio_path.open("rb") as f:
@@ -54,10 +55,8 @@ def _local_whisper_transcribe(
     audio_path: Path,
     local_model_name: str | None = None,
 ) -> tuple[str, float | None, str]:
-    import whisper
-
     model_name = local_model_name or os.environ.get("LOCAL_WHISPER_MODEL", "base")
-    model = whisper.load_model(model_name)
+    model = get_local_whisper_model(model_name)
     result = model.transcribe(
         str(audio_path),
         verbose=False,
@@ -131,8 +130,7 @@ def transcribe_then_label_with_bundle(
             audio_path,
             local_model_name=transcribe_model,
         )
-    stats = analyze_transcript_for_features(transcript_text, duration_sec)
-    feature_row = build_feature_vector(transcript_text, duration_sec)
+    stats, feature_row = analyze_transcript_for_ml(transcript_text, duration_sec)
     pred = predict_speed_and_filler(bundle=bundle, feature_row=feature_row)
 
     return {

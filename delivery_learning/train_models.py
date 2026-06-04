@@ -88,9 +88,9 @@ def transcribe_audio_local(audio_path: Path, model_name: str) -> tuple[str, floa
     로컬 Whisper STT:
     오디오 -> transcript_text + duration_sec(세그먼트 발화 합·ffprobe 등)
     """
-    import whisper
+    from delivery_learning.runtime import get_local_whisper_model
 
-    m = whisper.load_model(model_name)
+    m = get_local_whisper_model(model_name)
     result = m.transcribe(str(audio_path), verbose=False)
 
     transcript_text = (result.get("text") or "").strip()

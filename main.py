@@ -59,14 +59,9 @@ def health():
     return {"status": "ok"}
 
 
-@app.post("/api/v1/voice/analyze")
-def voice_analyze(
-    body: VoiceAnalyzeRequest,
-    x_delivery_learning_secret: str | None = Header(default=None, alias="X-Delivery-Learning-Secret"),
-):
-    _check_internal_secret(x_delivery_learning_secret)
+def _run_voice_analysis(user_id: int | None, feedback_id: int) -> dict:
     try:
-        return run_feedback_voice_analysis(body.user_id, body.feedback_id)
+        return run_feedback_voice_analysis(user_id, feedback_id)
     except PermissionError as e:
         raise HTTPException(status_code=403, detail=str(e)) from e
     except ValueError as e:
@@ -80,22 +75,19 @@ def voice_analyze(
         raise HTTPException(status_code=500, detail=f"분석 중 오류: {e!s}") from e
 
 
+@app.post("/api/v1/voice/analyze")
+def voice_analyze(
+    body: VoiceAnalyzeRequest,
+    x_delivery_learning_secret: str | None = Header(default=None, alias="X-Delivery-Learning-Secret"),
+):
+    _check_internal_secret(x_delivery_learning_secret)
+    return _run_voice_analysis(body.user_id, body.feedback_id)
+
+
 @app.post("/api/v1/voice/analyze-by-feedback")
 def voice_analyze_by_feedback(
     body: VoiceAnalyzeByFeedbackRequest,
     x_delivery_learning_secret: str | None = Header(default=None, alias="X-Delivery-Learning-Secret"),
 ):
     _check_internal_secret(x_delivery_learning_secret)
-    try:
-        return run_feedback_voice_analysis(body.user_id, body.feedback_id)
-    except PermissionError as e:
-        raise HTTPException(status_code=403, detail=str(e)) from e
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-    except RuntimeError as e:
-        raise HTTPException(status_code=503, detail=str(e)) from e
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=500, detail=f"오디오 파일 오류: {e}") from e
-    except Exception as e:  # noqa: BLE001
-        logger.exception("voice/analyze-by-feedback 처리 중 예외 발생")
-        raise HTTPException(status_code=500, detail=f"분석 중 오류: {e!s}") from e
+    return _run_voice_analysis(body.user_id, body.feedback_id)
