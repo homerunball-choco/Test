@@ -8,9 +8,14 @@ from __future__ import annotations
 
 import os
 
+import logging
+
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 from delivery_learning.config import settings
 from delivery_learning.voice_job import run_feedback_voice_analysis
@@ -71,6 +76,7 @@ def voice_analyze(
     except FileNotFoundError as e:
         raise HTTPException(status_code=500, detail=f"오디오 파일 오류: {e}") from e
     except Exception as e:  # noqa: BLE001
+        logger.exception("voice/analyze 처리 중 예외 발생")
         raise HTTPException(status_code=500, detail=f"분석 중 오류: {e!s}") from e
 
 
@@ -91,4 +97,5 @@ def voice_analyze_by_feedback(
     except FileNotFoundError as e:
         raise HTTPException(status_code=500, detail=f"오디오 파일 오류: {e}") from e
     except Exception as e:  # noqa: BLE001
+        logger.exception("voice/analyze-by-feedback 처리 중 예외 발생")
         raise HTTPException(status_code=500, detail=f"분석 중 오류: {e!s}") from e
