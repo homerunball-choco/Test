@@ -4,6 +4,11 @@ from dataclasses import dataclass
 
 from delivery_learning.consts import FILLER_WORDS
 
+_TOKENIZE_RE = re.compile(r"[가-힣]+|[A-Za-z0-9]+")
+_MULTI_FILLERS = tuple(sorted((w for w in FILLER_WORDS if len(w) >= 2), key=len, reverse=True))
+_SINGLE_FILLERS = tuple(w for w in FILLER_WORDS if len(w) == 1)
+_PLACEHOLDER = "\ufffc"
+
 
 @dataclass(frozen=True)
 class TranscriptStats:
@@ -27,7 +32,7 @@ def _tokenize_korean_words(text: str) -> list[str]:
     if not normalized:
         return []
 
-    return re.findall(r"[가-힣]+|[A-Za-z0-9]+", normalized)
+    return _TOKENIZE_RE.findall(normalized)
 
 
 def _is_hangul_syllable(ch: str) -> bool:
@@ -68,40 +73,35 @@ def _filler_token_counts_boundary(text: str) -> dict[str, int]:
     if not raw:
         return counts
 
-    multi = sorted([w for w in FILLER_WORDS if len(w) >= 2], key=len, reverse=True)
-    chars = list(raw)
+    masked = raw
 
-    for w in multi:
+    for w in _MULTI_FILLERS:
         wlen = len(w)
         start = 0
         while True:
-            idx = "".join(chars).find(w, start)
+            idx = masked.find(w, start)
             if idx < 0:
                 break
-            if _filler_span_valid("".join(chars), idx, wlen):
+            if _filler_span_valid(masked, idx, wlen):
                 counts[w] += 1
-                for k in range(idx, idx + wlen):
-                    chars[k] = "\ufffc"  # object replacement / placeholder
+                masked = masked[:idx] + (_PLACEHOLDER * wlen) + masked[idx + wlen :]
                 start = idx + wlen
             else:
                 start = idx + 1
 
-    masked = "".join(chars)
-    singles = [w for w in FILLER_WORDS if len(w) == 1]
-
-    for w in singles:
+    for w in _SINGLE_FILLERS:
         start = 0
         wlen = 1
         while True:
             idx = masked.find(w, start)
             if idx < 0:
                 break
-            if masked[idx] == "\ufffc":
+            if masked[idx] == _PLACEHOLDER:
                 start = idx + 1
                 continue
             if _filler_span_valid(masked, idx, wlen):
                 counts[w] += 1
-                masked = masked[:idx] + "\ufffc" + masked[idx + 1 :]
+                masked = masked[:idx] + _PLACEHOLDER + masked[idx + 1 :]
                 start = idx + 1
             else:
                 start = idx + 1
@@ -137,12 +137,17 @@ def analyze_transcript_for_features(transcript_text: str, duration_sec: float | 
     )
 
 
-def build_feature_vector(transcript_text: str, duration_sec: float | None) -> dict[str, float]:
+def build_feature_vector(
+    transcript_text: str,
+    duration_sec: float | None,
+    stats: TranscriptStats | None = None,
+) -> dict[str, float]:
     """
     ML 입력용 특징치.
     - speed_label/filler_label 분류에 직접 쓰일 최소한의 수치들 + filler 단어 후보별 카운트 일부
     """
-    stats = analyze_transcript_for_features(transcript_text, duration_sec)
+    if stats is None:
+        stats = analyze_transcript_for_features(transcript_text, duration_sec)
 
     wpm_val = stats.wpm if stats.wpm is not None else 0.0
     duration_val = float(duration_sec) if duration_sec is not None else 0.0
@@ -160,3 +165,12 @@ def build_feature_vector(transcript_text: str, duration_sec: float | None) -> di
         "filler_ratio": float(stats.filler_ratio),
         **filler_word_features,
     }
+
+
+def analyze_transcript_for_ml(
+    transcript_text: str,
+    duration_sec: float | None,
+) -> tuple[TranscriptStats, dict[str, float]]:
+    """전사 통계와 ML 특징 벡터를 한 번의 필러·토큰 분석으로 생성."""
+    stats = analyze_transcript_for_features(transcript_text, duration_sec)
+    return stats, build_feature_vector(transcript_text, duration_sec, stats=stats)

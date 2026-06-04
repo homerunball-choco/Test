@@ -9,13 +9,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-import boto3
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 from sqlalchemy.engine import Connection
 
 from delivery_learning.config import settings
-from delivery_learning.ml_models import TrainedModelBundle
 from delivery_learning.predict_models import transcribe_then_label_with_bundle
+from delivery_learning.runtime import get_db_engine, get_model_bundle, get_s3_client
 
 
 def _package_root() -> Path:
@@ -34,20 +33,11 @@ def _require_voice_api_config() -> None:
         raise RuntimeError("S3 다운로드를 위해 AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, S3_BUCKET_NAME 가 필요합니다.")
 
 
-def _s3_client():
-    return boto3.client(
-        "s3",
-        aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
-        aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
-        region_name=settings.AWS_REGION,
-    )
-
-
 def _download_audio_to_temp(s3_key: str) -> str:
     ext = Path(s3_key).suffix.lower() or ".bin"
     tmp = tempfile.NamedTemporaryFile(suffix=ext, delete=False)
     tmp.close()
-    _s3_client().download_file(settings.S3_BUCKET_NAME, s3_key, tmp.name)
+    get_s3_client().download_file(settings.S3_BUCKET_NAME, s3_key, tmp.name)
     return tmp.name
 
 
@@ -164,8 +154,8 @@ def run_feedback_voice_analysis(user_id: int | None, feedback_id: int) -> dict[s
     if not Path(model_dir).is_dir():
         raise RuntimeError(f"MODEL_DIR 경로가 없습니다: {model_dir}")
 
-    bundle = TrainedModelBundle.load(model_dir)
-    engine = create_engine(settings.db_connection_string, fast_executemany=True)
+    bundle = get_model_bundle(model_dir)
+    engine = get_db_engine()
 
     with engine.begin() as conn:
         # 다른 서버에서 user_id를 몰라도 feedback_id만으로 호출할 수 있게,
@@ -181,49 +171,51 @@ def run_feedback_voice_analysis(user_id: int | None, feedback_id: int) -> dict[s
             raise PermissionError("해당 피드백에 대한 접근 권한이 없습니다.")
 
         rows = _list_audio_rows(conn, feedback_id)
-        if not rows:
-            # 이미 transcript_text가 채워진 경우도 많으므로, "없음"은 조용히 통과합니다.
-            return {
-                "feedback_id": feedback_id,
-                "user_id": effective_user_id,
-                "slides_processed": 0,
-                "slides": [],
-            }
 
-        slide_results: list[dict[str, Any]] = []
+    if not rows:
+        # 이미 transcript_text가 채워진 경우도 많으므로, "없음"은 조용히 통과합니다.
+        return {
+            "feedback_id": feedback_id,
+            "user_id": effective_user_id,
+            "slides_processed": 0,
+            "slides": [],
+        }
 
-        for row in rows:
-            audio_analysis_id = int(row.id)
-            slide_index = int(row.slide_index)
-            s3_key = str(row.audio_key).strip()
-            local_path: str | None = None
-            try:
-                local_path = _download_audio_to_temp(s3_key)
-                payload = transcribe_then_label_with_bundle(
-                    local_path,
-                    bundle=bundle,
-                    openai_api_key=settings.OPENAI_API_KEY,
-                )
+    slide_results: list[dict[str, Any]] = []
+
+    for row in rows:
+        audio_analysis_id = int(row.id)
+        slide_index = int(row.slide_index)
+        s3_key = str(row.audio_key).strip()
+        local_path: str | None = None
+        try:
+            local_path = _download_audio_to_temp(s3_key)
+            payload = transcribe_then_label_with_bundle(
+                local_path,
+                bundle=bundle,
+                openai_api_key=settings.OPENAI_API_KEY,
+            )
+            with engine.begin() as conn:
                 _update_audio_analysis_row(
                     conn,
                     audio_analysis_id,
                     payload,
                     settings.ANALYZER_VERSION,
                 )
-                slide_results.append(
-                    {
-                        "audio_analysis_id": audio_analysis_id,
-                        "slide_index": slide_index,
-                        "speed_label": payload["speed_label"],
-                        "filler_label": payload["filler_label"],
-                    }
-                )
-            finally:
-                if local_path and os.path.isfile(local_path):
-                    try:
-                        os.unlink(local_path)
-                    except OSError:
-                        pass
+            slide_results.append(
+                {
+                    "audio_analysis_id": audio_analysis_id,
+                    "slide_index": slide_index,
+                    "speed_label": payload["speed_label"],
+                    "filler_label": payload["filler_label"],
+                }
+            )
+        finally:
+            if local_path and os.path.isfile(local_path):
+                try:
+                    os.unlink(local_path)
+                except OSError:
+                    pass
 
     return {
         "feedback_id": feedback_id,
